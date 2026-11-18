@@ -30,7 +30,8 @@ class ScannerPage extends StatefulWidget {
   State<ScannerPage> createState() => _ScannerPageState();
 }
 
-class _ScannerPageState extends State<ScannerPage> {
+class _ScannerPageState extends State<ScannerPage>
+    with WidgetsBindingObserver {
   final MobileScannerController _controller = MobileScannerController(
     formats: const [BarcodeFormat.qrCode],
   );
@@ -49,13 +50,42 @@ class _ScannerPageState extends State<ScannerPage> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _loadSettings();
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _controller.dispose();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (!_controller.value.hasCameraPermission) return;
+    if (state == AppLifecycleState.resumed) {
+      if (!_controller.value.isRunning) _safeStart();
+    } else if (state == AppLifecycleState.paused) {
+      if (_controller.value.isRunning) _safeStop();
+    }
+  }
+
+  Future<void> _safeStop() async {
+    try {
+      await _controller.stop();
+    } catch (_) {}
+  }
+
+  Future<void> _safeStart() async {
+    try {
+      await _controller.start();
+    } catch (_) {}
+  }
+
+  Future<void> _restartCamera() async {
+    await _safeStop();
+    await _safeStart();
   }
 
   Future<void> _loadSettings() async {
@@ -133,9 +163,13 @@ class _ScannerPageState extends State<ScannerPage> {
   }
 
   Future<void> _openSettings() async {
+    await _safeStop();
+    if (!mounted) return;
     final saved = await Navigator.of(context).push<bool>(
       MaterialPageRoute(builder: (_) => const SettingsPage()),
     );
+    await _safeStart();
+    if (!mounted) return;
     if (saved == true) {
       await _loadSettings();
       _setStatus('Settings save ho gayin', true);
@@ -166,7 +200,43 @@ class _ScannerPageState extends State<ScannerPage> {
       ),
       body: Stack(
         children: [
-          MobileScanner(controller: _controller, onDetect: _onDetect),
+          MobileScanner(
+            controller: _controller,
+            onDetect: _onDetect,
+            errorBuilder: (context, error, child) {
+              final details = error.errorDetails?.message ?? '';
+              return Container(
+                color: Colors.black,
+                padding: const EdgeInsets.all(24),
+                child: Center(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.error_outline,
+                          color: Colors.white, size: 48),
+                      const SizedBox(height: 12),
+                      const Text(
+                        'Camera start nahin ho saka',
+                        style: TextStyle(color: Colors.white, fontSize: 18),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        'Code: ${error.errorCode.name}\n$details',
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(
+                            color: Colors.white70, fontSize: 13),
+                      ),
+                      const SizedBox(height: 16),
+                      FilledButton(
+                        onPressed: _restartCamera,
+                        child: const Text('Dobara koshish karein'),
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            },
+          ),
           Positioned(
             left: 12,
             right: 12,
